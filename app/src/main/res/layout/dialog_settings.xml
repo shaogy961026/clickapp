@@ -16,15 +16,4 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:inputType="number" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="延遲啟動時間 (毫秒)" />
-
-    <EditText
-        android:id="@+id/delayStartInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:inputType="number" />
 </LinearLayout>
