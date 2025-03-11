@@ -13,16 +13,21 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.Button
+import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
+import android.view.inputmethod.InputMethodManager
 
 class FloatingService : Service() {
 
     private lateinit var windowManager: WindowManager
     private var toolbarView: View? = null
     private var clickPointView: ImageView? = null
+    private var settingsView: View? = null
     private lateinit var playPauseButton: ImageButton
     private lateinit var settingsButton: ImageButton
     private lateinit var locationButton: ImageButton
@@ -30,13 +35,25 @@ class FloatingService : Service() {
     private lateinit var closeButton: ImageButton
     private var isClicking = false
     private var clickInterval = 1000L
-    private var clickX = 0f // 點擊座標
+    private var duration = 0L
+    private var stopTime = 0L
+    private var commonX = 2956f
+    private var commonY = 1256f
+    private var clickX = 0f
     private var clickY = 0f
     private val handler = Handler(Looper.getMainLooper())
     private val clickRunnable: Runnable = object : Runnable {
         override fun run() {
             if (isClicking) {
-                // 動態獲取 clickPointView 的中心點
+                val currentTime = System.currentTimeMillis()
+                if (duration > 0 && currentTime >= stopTime) {
+                    isClicking = false
+                    playPauseButton.setImageResource(android.R.drawable.ic_media_play)
+                    handler.removeCallbacks(this)
+                    Toast.makeText(this@FloatingService, "持續時間已到，停止點擊", Toast.LENGTH_SHORT).show()
+                    Log.d("FloatingService", "持續時間結束，停止點擊")
+                    return
+                }
                 val location = IntArray(2)
                 clickPointView?.getLocationOnScreen(location)
                 clickX = (location[0] + (clickPointView?.width ?: 50) / 2f)
@@ -52,6 +69,7 @@ class FloatingService : Service() {
 
     private var toolbarParams: WindowManager.LayoutParams? = null
     private var clickPointParams: WindowManager.LayoutParams? = null
+    private var settingsParams: WindowManager.LayoutParams? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -111,7 +129,7 @@ class FloatingService : Service() {
             50,
             50,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, // 移除 FLAG_NOT_TOUCHABLE 以允許拖曳
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -124,6 +142,98 @@ class FloatingService : Service() {
         clickY = clickPointParams!!.y + 25f
     }
 
+    private fun showSettingsWindow() {
+        if (settingsView != null) {
+            windowManager.removeView(settingsView)
+        }
+
+        // 定義 intervalEdit 在函數範圍
+        lateinit var intervalEdit: EditText
+
+        settingsView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20, 20, 20, 20)
+            setBackgroundColor(0xFFEEEEEE.toInt())
+
+            // 點擊間隔
+            addView(TextView(this@FloatingService).apply {
+                text = "點擊間隔 (ms, 100-10000):"
+            })
+            intervalEdit = EditText(this@FloatingService).apply {
+                setText(clickInterval.toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            addView(intervalEdit)
+
+            // 持續時間
+            addView(TextView(this@FloatingService).apply {
+                text = "持續時間 (秒, 0 表示無限):"
+            })
+            val durationEdit = EditText(this@FloatingService).apply {
+                setText((duration / 1000).toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            addView(durationEdit)
+
+            // 常用位置 X
+            addView(TextView(this@FloatingService).apply {
+                text = "常用位置 X:"
+            })
+            val xEdit = EditText(this@FloatingService).apply {
+                setText(commonX.toInt().toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            addView(xEdit)
+
+            // 常用位置 Y
+            addView(TextView(this@FloatingService).apply {
+                text = "常用位置 Y:"
+            })
+            val yEdit = EditText(this@FloatingService).apply {
+                setText(commonY.toInt().toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            addView(yEdit)
+
+            // 確認按鈕
+            val confirmButton = Button(this@FloatingService).apply {
+                text = "確認"
+                setOnClickListener {
+                    val interval = intervalEdit.text.toString().toLongOrNull() ?: clickInterval
+                    clickInterval = interval.coerceIn(100L, 10000L)
+
+                    val durationSec = durationEdit.text.toString().toLongOrNull() ?: (duration / 1000)
+                    duration = if (durationSec > 0) durationSec * 1000 else 0
+
+                    commonX = (xEdit.text.toString().toFloatOrNull() ?: commonX).coerceAtLeast(0f)
+                    commonY = (yEdit.text.toString().toFloatOrNull() ?: commonY).coerceAtLeast(0f)
+
+                    windowManager.removeView(settingsView)
+                    settingsView = null
+                    Toast.makeText(this@FloatingService, "設定已更新", Toast.LENGTH_SHORT).show()
+                }
+            }
+            addView(confirmButton)
+        }
+
+        settingsParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+        }
+
+        windowManager.addView(settingsView, settingsParams)
+
+        // 自動聚焦並彈出鍵盤
+        intervalEdit.requestFocus()
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(intervalEdit, InputMethodManager.SHOW_IMPLICIT)
+    }
+
     private fun setupListeners() {
         playPauseButton.setOnClickListener {
             isClicking = !isClicking
@@ -134,17 +244,20 @@ class FloatingService : Service() {
                     return@setOnClickListener
                 }
                 Log.d("FloatingService", "開始點擊")
+                if (duration > 0) {
+                    stopTime = System.currentTimeMillis() + duration
+                }
                 handler.post(clickRunnable)
                 playPauseButton.setImageResource(android.R.drawable.ic_media_pause)
             } else {
-                Log.d("FloatingService", "停止點擊")
+                Log.d("FloatingService", "手動停止點擊")
                 handler.removeCallbacks(clickRunnable)
                 playPauseButton.setImageResource(android.R.drawable.ic_media_play)
             }
         }
 
         settingsButton.setOnClickListener {
-            Toast.makeText(this, "設置功能尚未實作", Toast.LENGTH_SHORT).show()
+            showSettingsWindow()
         }
 
         locationButton.setOnClickListener {
@@ -153,8 +266,8 @@ class FloatingService : Service() {
             val screenWidth = metrics.widthPixels
             val screenHeight = metrics.heightPixels
 
-            var targetX = 2956
-            var targetY = 1256
+            var targetX = commonX.toInt()
+            var targetY = commonY.toInt()
             if (targetX + 50 > screenWidth) targetX = screenWidth - 50
             if (targetY + 50 > screenHeight) targetY = screenHeight - 50
             if (targetX < 0) targetX = 0
@@ -204,7 +317,6 @@ class FloatingService : Service() {
             }
         })
 
-        // 添加 clickPointView 的拖曳功能
         clickPointView?.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -214,7 +326,7 @@ class FloatingService : Service() {
             override fun onTouch(v: View?, event: MotionEvent): Boolean {
                 if (isClicking) {
                     Toast.makeText(this@FloatingService, "點擊進行中，無法移動", Toast.LENGTH_SHORT).show()
-                    return true // 阻止移動
+                    return true
                 }
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
@@ -270,8 +382,10 @@ class FloatingService : Service() {
         try {
             toolbarView?.let { windowManager.removeView(it) }
             clickPointView?.let { windowManager.removeView(it) }
+            settingsView?.let { windowManager.removeView(it) }
             toolbarView = null
             clickPointView = null
+            settingsView = null
         } catch (e: Exception) {
             Log.e("FloatingService", "移除視圖失敗: ${e.message}")
         }
