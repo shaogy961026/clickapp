@@ -29,7 +29,6 @@ class FloatingService : Service() {
     private lateinit var recordButton: ImageButton
     private lateinit var closeButton: ImageButton
     private var isClicking = false
-    private var isRecording = false
     private var clickInterval = 1000L
     private var clickX = 0f // 點擊座標
     private var clickY = 0f
@@ -37,6 +36,11 @@ class FloatingService : Service() {
     private val clickRunnable: Runnable = object : Runnable {
         override fun run() {
             if (isClicking) {
+                // 動態獲取 clickPointView 的中心點
+                val location = IntArray(2)
+                clickPointView?.getLocationOnScreen(location)
+                clickX = (location[0] + (clickPointView?.width ?: 50) / 2f)
+                clickY = (location[1] + (clickPointView?.height ?: 50) / 2f)
                 Log.d("FloatingService", "執行點擊: x=$clickX, y=$clickY")
                 performClickAt(clickX, clickY)
                 handler.postDelayed(this, clickInterval)
@@ -107,7 +111,7 @@ class FloatingService : Service() {
             50,
             50,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, // 移除 FLAG_NOT_TOUCHABLE 以允許拖曳
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -118,15 +122,6 @@ class FloatingService : Service() {
         windowManager.addView(clickPointView, clickPointParams)
         clickX = clickPointParams!!.x + 25f
         clickY = clickPointParams!!.y + 25f
-    }
-
-    private fun getStatusBarHeight(): Int {
-        var result = 0
-        val resourceId = resources.getIdentifier("status_bar_height", "dimen", "android")
-        if (resourceId > 0) {
-            result = resources.getDimensionPixelSize(resourceId)
-        }
-        return result
     }
 
     private fun setupListeners() {
@@ -174,44 +169,7 @@ class FloatingService : Service() {
         }
 
         recordButton.setOnClickListener {
-            if (isClicking) {
-                Toast.makeText(this, "請先停止點擊", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            isRecording = true
-            Toast.makeText(this, "請點擊螢幕設定位置", Toast.LENGTH_SHORT).show()
-            recordButton.setImageResource(android.R.drawable.ic_menu_camera)
-            val overlayView = View(this).apply {
-                layoutParams = WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                    PixelFormat.TRANSLUCENT
-                )
-            }
-            windowManager.addView(overlayView, overlayView.layoutParams)
-            overlayView.setOnTouchListener { _, event ->
-                if (isRecording && event.action == MotionEvent.ACTION_DOWN) {
-                    val statusBarHeight = getStatusBarHeight()
-                    clickX = event.rawX
-                    clickY = event.rawY
-                    clickPointParams?.x = (clickX - 25f).toInt()
-                    clickPointParams?.y = (clickY - 25f - statusBarHeight).toInt() // 減去狀態列高度
-                    clickPointView?.let { windowManager.updateViewLayout(it, clickPointParams) }
-                    isRecording = false
-                    recordButton.setImageResource(android.R.drawable.ic_menu_edit)
-                    windowManager.removeView(overlayView)
-                    Toast.makeText(this, "點擊位置已更新: x=$clickX, y=$clickY", Toast.LENGTH_SHORT).show()
-                    // 驗證實際位置
-                    val location = IntArray(2)
-                    clickPointView?.getLocationOnScreen(location)
-                    Log.d("FloatingService", "clickPointView 實際位置: x=${location[0] + 25f}, y=${location[1] + 25f}")
-                    true
-                } else {
-                    false
-                }
-            }
+            Toast.makeText(this, "錄製功能已移除", Toast.LENGTH_SHORT).show()
         }
 
         closeButton.setOnClickListener {
@@ -239,6 +197,37 @@ class FloatingService : Service() {
                         toolbarParams?.x = (initialX + (event.rawX - initialTouchX)).toInt()
                         toolbarParams?.y = (initialY + (event.rawY - initialTouchY)).toInt()
                         toolbarView?.let { windowManager.updateViewLayout(it, toolbarParams) }
+                        return true
+                    }
+                }
+                return false
+            }
+        })
+
+        // 添加 clickPointView 的拖曳功能
+        clickPointView?.setOnTouchListener(object : View.OnTouchListener {
+            private var initialX = 0
+            private var initialY = 0
+            private var initialTouchX = 0f
+            private var initialTouchY = 0f
+
+            override fun onTouch(v: View?, event: MotionEvent): Boolean {
+                if (isClicking) {
+                    Toast.makeText(this@FloatingService, "點擊進行中，無法移動", Toast.LENGTH_SHORT).show()
+                    return true // 阻止移動
+                }
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialX = clickPointParams?.x ?: 0
+                        initialY = clickPointParams?.y ?: 0
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        return true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        clickPointParams?.x = (initialX + (event.rawX - initialTouchX)).toInt()
+                        clickPointParams?.y = (initialY + (event.rawY - initialTouchY)).toInt()
+                        clickPointView?.let { windowManager.updateViewLayout(it, clickPointParams) }
                         return true
                     }
                 }
