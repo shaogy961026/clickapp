@@ -6,6 +6,7 @@ import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -20,8 +21,8 @@ import android.widget.Toast
 class FloatingService : Service() {
 
     private lateinit var windowManager: WindowManager
-    private lateinit var toolbarView: View
-    private lateinit var clickPointView: ImageView
+    private var toolbarView: View? = null
+    private var clickPointView: ImageView? = null
     private lateinit var playPauseButton: ImageButton
     private lateinit var settingsButton: ImageButton
     private lateinit var locationButton: ImageButton
@@ -45,26 +46,29 @@ class FloatingService : Service() {
         }
     }
 
-    private lateinit var toolbarParams: WindowManager.LayoutParams
-    private lateinit var clickPointParams: WindowManager.LayoutParams
+    private var toolbarParams: WindowManager.LayoutParams? = null
+    private var clickPointParams: WindowManager.LayoutParams? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        cleanupViewsIfExist()
-        setupToolbar()
-        setupClickPoint()
-        setupListeners()
-        Toast.makeText(this, "浮動工具列已啟動", Toast.LENGTH_SHORT).show()
+        if (toolbarView == null || clickPointView == null) {
+            setupToolbar()
+            setupClickPoint()
+            setupListeners()
+            Toast.makeText(this, "浮動工具列已啟動", Toast.LENGTH_SHORT).show()
+        } else {
+            Log.d("FloatingService", "服務已運行，重用現有視圖")
+        }
         return START_STICKY
     }
 
     private fun setupToolbar() {
         toolbarView = LayoutInflater.from(this).inflate(R.layout.floating_view, null)
-        playPauseButton = toolbarView.findViewById(R.id.playPauseButton)
-        settingsButton = toolbarView.findViewById(R.id.settingsButton)
-        locationButton = toolbarView.findViewById(R.id.locationButton)
-        recordButton = toolbarView.findViewById(R.id.recordButton)
-        closeButton = toolbarView.findViewById(R.id.closeButton)
+        playPauseButton = toolbarView!!.findViewById(R.id.playPauseButton)
+        settingsButton = toolbarView!!.findViewById(R.id.settingsButton)
+        locationButton = toolbarView!!.findViewById(R.id.locationButton)
+        recordButton = toolbarView!!.findViewById(R.id.recordButton)
+        closeButton = toolbarView!!.findViewById(R.id.closeButton)
 
         toolbarParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -84,25 +88,45 @@ class FloatingService : Service() {
     private fun setupClickPoint() {
         clickPointView = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_menu_add)
-            // 強制設置寬高，避免初始化為 0
             layoutParams = WindowManager.LayoutParams(50, 50)
         }
 
+        val metrics = DisplayMetrics()
+        windowManager.defaultDisplay.getMetrics(metrics)
+        val screenWidth = metrics.widthPixels
+        val screenHeight = metrics.heightPixels
+
+        var initialX = 540
+        var initialY = 960
+        if (initialX + 50 > screenWidth) initialX = screenWidth - 50
+        if (initialY + 50 > screenHeight) initialY = screenHeight - 50
+        if (initialX < 0) initialX = 0
+        if (initialY < 0) initialY = 0
+
         clickPointParams = WindowManager.LayoutParams(
-            50, // 固定寬度
-            50, // 固定高度
+            50,
+            50,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 540 // 初始位置
-            y = 960
+            x = initialX
+            y = initialY
         }
 
         windowManager.addView(clickPointView, clickPointParams)
-        clickX = clickPointParams.x + 25f // 中心點
-        clickY = clickPointParams.y + 25f
+        clickX = clickPointParams!!.x + 25f
+        clickY = clickPointParams!!.y + 25f
+    }
+
+    private fun getStatusBarHeight(): Int {
+        var result = 0
+        val resourceId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (resourceId > 0) {
+            result = resources.getDimensionPixelSize(resourceId)
+        }
+        return result
     }
 
     private fun setupListeners() {
@@ -129,7 +153,24 @@ class FloatingService : Service() {
         }
 
         locationButton.setOnClickListener {
-            Toast.makeText(this, "定位功能尚未實作", Toast.LENGTH_SHORT).show()
+            val metrics = DisplayMetrics()
+            windowManager.defaultDisplay.getMetrics(metrics)
+            val screenWidth = metrics.widthPixels
+            val screenHeight = metrics.heightPixels
+
+            var targetX = 2956
+            var targetY = 1256
+            if (targetX + 50 > screenWidth) targetX = screenWidth - 50
+            if (targetY + 50 > screenHeight) targetY = screenHeight - 50
+            if (targetX < 0) targetX = 0
+            if (targetY < 0) targetY = 0
+
+            clickX = targetX + 25f
+            clickY = targetY + 25f
+            clickPointParams?.x = targetX
+            clickPointParams?.y = targetY
+            clickPointView?.let { windowManager.updateViewLayout(it, clickPointParams) }
+            Toast.makeText(this, "已移動到常用位置: x=$clickX, y=$clickY", Toast.LENGTH_SHORT).show()
         }
 
         recordButton.setOnClickListener {
@@ -140,7 +181,6 @@ class FloatingService : Service() {
             isRecording = true
             Toast.makeText(this, "請點擊螢幕設定位置", Toast.LENGTH_SHORT).show()
             recordButton.setImageResource(android.R.drawable.ic_menu_camera)
-            // 添加全屏透明覆蓋層來捕捉觸控
             val overlayView = View(this).apply {
                 layoutParams = WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
@@ -153,15 +193,20 @@ class FloatingService : Service() {
             windowManager.addView(overlayView, overlayView.layoutParams)
             overlayView.setOnTouchListener { _, event ->
                 if (isRecording && event.action == MotionEvent.ACTION_DOWN) {
+                    val statusBarHeight = getStatusBarHeight()
                     clickX = event.rawX
                     clickY = event.rawY
-                    clickPointParams.x = (clickX - 25f).toInt() // 中心對準
-                    clickPointParams.y = (clickY - 25f).toInt()
-                    windowManager.updateViewLayout(clickPointView, clickPointParams)
+                    clickPointParams?.x = (clickX - 25f).toInt()
+                    clickPointParams?.y = (clickY - 25f - statusBarHeight).toInt() // 減去狀態列高度
+                    clickPointView?.let { windowManager.updateViewLayout(it, clickPointParams) }
                     isRecording = false
                     recordButton.setImageResource(android.R.drawable.ic_menu_edit)
                     windowManager.removeView(overlayView)
                     Toast.makeText(this, "點擊位置已更新: x=$clickX, y=$clickY", Toast.LENGTH_SHORT).show()
+                    // 驗證實際位置
+                    val location = IntArray(2)
+                    clickPointView?.getLocationOnScreen(location)
+                    Log.d("FloatingService", "clickPointView 實際位置: x=${location[0] + 25f}, y=${location[1] + 25f}")
                     true
                 } else {
                     false
@@ -174,7 +219,7 @@ class FloatingService : Service() {
             stopSelf()
         }
 
-        val toolbarLayout = toolbarView.findViewById<LinearLayout>(R.id.toolbarLayout)
+        val toolbarLayout = toolbarView!!.findViewById<LinearLayout>(R.id.toolbarLayout)
         toolbarLayout.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -184,16 +229,16 @@ class FloatingService : Service() {
             override fun onTouch(v: View?, event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
-                        initialX = toolbarParams.x
-                        initialY = toolbarParams.y
+                        initialX = toolbarParams?.x ?: 0
+                        initialY = toolbarParams?.y ?: 0
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        toolbarParams.x = (initialX + (event.rawX - initialTouchX)).toInt()
-                        toolbarParams.y = (initialY + (event.rawY - initialTouchY)).toInt()
-                        windowManager.updateViewLayout(toolbarView, toolbarParams)
+                        toolbarParams?.x = (initialX + (event.rawX - initialTouchX)).toInt()
+                        toolbarParams?.y = (initialY + (event.rawY - initialTouchY)).toInt()
+                        toolbarView?.let { windowManager.updateViewLayout(it, toolbarParams) }
                         return true
                     }
                 }
@@ -234,19 +279,12 @@ class FloatingService : Service() {
 
     private fun cleanupViews() {
         try {
-            windowManager.removeView(toolbarView)
-            windowManager.removeView(clickPointView)
+            toolbarView?.let { windowManager.removeView(it) }
+            clickPointView?.let { windowManager.removeView(it) }
+            toolbarView = null
+            clickPointView = null
         } catch (e: Exception) {
             Log.e("FloatingService", "移除視圖失敗: ${e.message}")
-        }
-    }
-
-    private fun cleanupViewsIfExist() {
-        try {
-            if (::toolbarView.isInitialized) windowManager.removeView(toolbarView)
-            if (::clickPointView.isInitialized) windowManager.removeView(clickPointView)
-        } catch (e: Exception) {
-            Log.e("FloatingService", "清理舊視圖失敗: ${e.message}")
         }
     }
 }

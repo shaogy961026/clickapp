@@ -21,9 +21,7 @@ class ClickService : AccessibilityService() {
         Log.d("ClickService", "無障礙服務已中斷")
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // 不再用於錄製
-    }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
     fun performClick(x: Int, y: Int) {
         Log.d("ClickService", "開始執行點擊: x=$x, y=$y")
