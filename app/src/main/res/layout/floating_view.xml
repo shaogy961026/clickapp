@@ -3,47 +3,51 @@
     android:id="@+id/toolbarLayout"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:padding="15dp"
-    android:background="#80000000">
+    android:orientation="vertical"
+    android:background="#80000000"
+    android:padding="5dp">
 
-    <ImageButton
-        android:id="@+id/playPauseButton"
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:src="@android:drawable/ic_media_play"
-        android:background="@null"
-        android:layout_margin="5dp" />
+        android:orientation="horizontal">
 
-    <ImageButton
-        android:id="@+id/settingsButton"
+        <ImageButton
+            android:id="@+id/playPauseButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_media_play"
+            android:background="@null" />
+
+        <ImageButton
+            android:id="@+id/settingsButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_menu_preferences"
+            android:background="@null" />
+
+        <ImageButton
+            android:id="@+id/locationButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_menu_mylocation"
+            android:background="@null" />
+
+        <ImageButton
+            android:id="@+id/closeButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:background="@null" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/timerText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:src="@android:drawable/ic_menu_preferences"
-        android:background="@null"
-        android:layout_margin="5dp" />
+        android:text="剩餘：無限"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:layout_gravity="center_horizontal" />
 
-    <ImageButton
-        android:id="@+id/locationButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:src="@android:drawable/ic_menu_mylocation"
-        android:background="@null"
-        android:layout_margin="5dp" />
-
-    <ImageButton
-        android:id="@+id/recordButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:src="@android:drawable/ic_menu_edit"
-        android:background="@null"
-        android:layout_margin="5dp" />
-
-    <ImageButton
-        android:id="@+id/closeButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:src="@android:drawable/ic_menu_close_clear_cancel"
-        android:background="@null"
-        android:layout_margin="5dp" />
 </LinearLayout>

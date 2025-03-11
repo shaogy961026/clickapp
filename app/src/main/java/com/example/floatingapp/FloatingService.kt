@@ -31,8 +31,8 @@ class FloatingService : Service() {
     private lateinit var playPauseButton: ImageButton
     private lateinit var settingsButton: ImageButton
     private lateinit var locationButton: ImageButton
-    private lateinit var recordButton: ImageButton
     private lateinit var closeButton: ImageButton
+    private lateinit var timerText: TextView // 新增計時器顯示
     private var isClicking = false
     private var clickInterval = 1000L
     private var duration = 0L
@@ -50,6 +50,7 @@ class FloatingService : Service() {
                     isClicking = false
                     playPauseButton.setImageResource(android.R.drawable.ic_media_play)
                     handler.removeCallbacks(this)
+                    updateTimerText()
                     Toast.makeText(this@FloatingService, "持續時間已到，停止點擊", Toast.LENGTH_SHORT).show()
                     Log.d("FloatingService", "持續時間結束，停止點擊")
                     return
@@ -63,6 +64,14 @@ class FloatingService : Service() {
                 handler.postDelayed(this, clickInterval)
             } else {
                 Log.d("FloatingService", "停止點擊")
+            }
+        }
+    }
+    private val timerRunnable: Runnable = object : Runnable {
+        override fun run() {
+            updateTimerText()
+            if (isClicking && duration > 0) {
+                handler.postDelayed(this, 1000L) // 每秒更新
             }
         }
     }
@@ -89,8 +98,8 @@ class FloatingService : Service() {
         playPauseButton = toolbarView!!.findViewById(R.id.playPauseButton)
         settingsButton = toolbarView!!.findViewById(R.id.settingsButton)
         locationButton = toolbarView!!.findViewById(R.id.locationButton)
-        recordButton = toolbarView!!.findViewById(R.id.recordButton)
         closeButton = toolbarView!!.findViewById(R.id.closeButton)
+        timerText = toolbarView!!.findViewById(R.id.timerText) // 初始化計時器
 
         toolbarParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -105,6 +114,7 @@ class FloatingService : Service() {
         }
 
         windowManager.addView(toolbarView, toolbarParams)
+        updateTimerText() // 初始顯示
     }
 
     private fun setupClickPoint() {
@@ -147,7 +157,6 @@ class FloatingService : Service() {
             windowManager.removeView(settingsView)
         }
 
-        // 定義 intervalEdit 在函數範圍
         lateinit var intervalEdit: EditText
 
         settingsView = LinearLayout(this).apply {
@@ -155,7 +164,6 @@ class FloatingService : Service() {
             setPadding(20, 20, 20, 20)
             setBackgroundColor(0xFFEEEEEE.toInt())
 
-            // 點擊間隔
             addView(TextView(this@FloatingService).apply {
                 text = "點擊間隔 (ms, 100-10000):"
             })
@@ -165,7 +173,6 @@ class FloatingService : Service() {
             }
             addView(intervalEdit)
 
-            // 持續時間
             addView(TextView(this@FloatingService).apply {
                 text = "持續時間 (秒, 0 表示無限):"
             })
@@ -175,7 +182,6 @@ class FloatingService : Service() {
             }
             addView(durationEdit)
 
-            // 常用位置 X
             addView(TextView(this@FloatingService).apply {
                 text = "常用位置 X:"
             })
@@ -185,7 +191,6 @@ class FloatingService : Service() {
             }
             addView(xEdit)
 
-            // 常用位置 Y
             addView(TextView(this@FloatingService).apply {
                 text = "常用位置 Y:"
             })
@@ -195,7 +200,6 @@ class FloatingService : Service() {
             }
             addView(yEdit)
 
-            // 確認按鈕
             val confirmButton = Button(this@FloatingService).apply {
                 text = "確認"
                 setOnClickListener {
@@ -204,6 +208,7 @@ class FloatingService : Service() {
 
                     val durationSec = durationEdit.text.toString().toLongOrNull() ?: (duration / 1000)
                     duration = if (durationSec > 0) durationSec * 1000 else 0
+                    updateTimerText()
 
                     commonX = (xEdit.text.toString().toFloatOrNull() ?: commonX).coerceAtLeast(0f)
                     commonY = (yEdit.text.toString().toFloatOrNull() ?: commonY).coerceAtLeast(0f)
@@ -228,10 +233,20 @@ class FloatingService : Service() {
 
         windowManager.addView(settingsView, settingsParams)
 
-        // 自動聚焦並彈出鍵盤
         intervalEdit.requestFocus()
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         imm.showSoftInput(intervalEdit, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun updateTimerText() {
+        if (duration == 0L) {
+            timerText.text = "剩餘：無限"
+        } else if (isClicking) {
+            val remainingTime = (stopTime - System.currentTimeMillis()).coerceAtLeast(0) / 1000
+            timerText.text = "剩餘：$remainingTime 秒"
+        } else {
+            timerText.text = "剩餘：${duration / 1000} 秒"
+        }
     }
 
     private fun setupListeners() {
@@ -246,12 +261,15 @@ class FloatingService : Service() {
                 Log.d("FloatingService", "開始點擊")
                 if (duration > 0) {
                     stopTime = System.currentTimeMillis() + duration
+                    handler.post(timerRunnable) // 啟動計時器
                 }
                 handler.post(clickRunnable)
                 playPauseButton.setImageResource(android.R.drawable.ic_media_pause)
             } else {
                 Log.d("FloatingService", "手動停止點擊")
                 handler.removeCallbacks(clickRunnable)
+                handler.removeCallbacks(timerRunnable)
+                updateTimerText()
                 playPauseButton.setImageResource(android.R.drawable.ic_media_play)
             }
         }
@@ -279,10 +297,6 @@ class FloatingService : Service() {
             clickPointParams?.y = targetY
             clickPointView?.let { windowManager.updateViewLayout(it, clickPointParams) }
             Toast.makeText(this, "已移動到常用位置: x=$clickX, y=$clickY", Toast.LENGTH_SHORT).show()
-        }
-
-        recordButton.setOnClickListener {
-            Toast.makeText(this, "錄製功能已移除", Toast.LENGTH_SHORT).show()
         }
 
         closeButton.setOnClickListener {
@@ -355,6 +369,8 @@ class FloatingService : Service() {
             isClicking = false
             playPauseButton.setImageResource(android.R.drawable.ic_media_play)
             handler.removeCallbacks(clickRunnable)
+            handler.removeCallbacks(timerRunnable)
+            updateTimerText()
             Toast.makeText(this, "無障礙服務斷開，請重啟應用或設備", Toast.LENGTH_LONG).show()
             return
         }
@@ -366,6 +382,7 @@ class FloatingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacks(clickRunnable)
+        handler.removeCallbacks(timerRunnable)
         cleanupViews()
         Log.d("FloatingService", "服務已銷毀")
     }
@@ -374,6 +391,7 @@ class FloatingService : Service() {
         super.onTaskRemoved(rootIntent)
         Log.d("FloatingService", "應用被滑掉，清理並停止服務")
         handler.removeCallbacks(clickRunnable)
+        handler.removeCallbacks(timerRunnable)
         cleanupViews()
         stopSelf()
     }
