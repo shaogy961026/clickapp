@@ -32,7 +32,7 @@ class FloatingService : Service() {
     private lateinit var settingsButton: ImageButton
     private lateinit var locationButton: ImageButton
     private lateinit var closeButton: ImageButton
-    private lateinit var timerText: TextView // 新增計時器顯示
+    private lateinit var timerText: TextView
     private var isClicking = false
     private var clickInterval = 1000L
     private var duration = 0L
@@ -51,6 +51,7 @@ class FloatingService : Service() {
                     playPauseButton.setImageResource(android.R.drawable.ic_media_play)
                     handler.removeCallbacks(this)
                     updateTimerText()
+                    updateClickPointTouchable(true) // 恢復可拖曳
                     Toast.makeText(this@FloatingService, "持續時間已到，停止點擊", Toast.LENGTH_SHORT).show()
                     Log.d("FloatingService", "持續時間結束，停止點擊")
                     return
@@ -71,7 +72,7 @@ class FloatingService : Service() {
         override fun run() {
             updateTimerText()
             if (isClicking && duration > 0) {
-                handler.postDelayed(this, 1000L) // 每秒更新
+                handler.postDelayed(this, 1000L)
             }
         }
     }
@@ -99,13 +100,13 @@ class FloatingService : Service() {
         settingsButton = toolbarView!!.findViewById(R.id.settingsButton)
         locationButton = toolbarView!!.findViewById(R.id.locationButton)
         closeButton = toolbarView!!.findViewById(R.id.closeButton)
-        timerText = toolbarView!!.findViewById(R.id.timerText) // 初始化計時器
+        timerText = toolbarView!!.findViewById(R.id.timerText)
 
         toolbarParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, // 只設不搶焦點，允許觸控
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -114,7 +115,7 @@ class FloatingService : Service() {
         }
 
         windowManager.addView(toolbarView, toolbarParams)
-        updateTimerText() // 初始顯示
+        updateTimerText()
     }
 
     private fun setupClickPoint() {
@@ -139,7 +140,7 @@ class FloatingService : Service() {
             50,
             50,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, // 只設不搶焦點，允許拖曳
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -225,7 +226,7 @@ class FloatingService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, // 允許底層觸控
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.CENTER
@@ -249,6 +250,15 @@ class FloatingService : Service() {
         }
     }
 
+    private fun updateClickPointTouchable(touchable: Boolean) {
+        clickPointParams?.flags = if (touchable) {
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        } else {
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        clickPointView?.let { windowManager.updateViewLayout(it, clickPointParams) }
+    }
+
     private fun setupListeners() {
         playPauseButton.setOnClickListener {
             isClicking = !isClicking
@@ -261,8 +271,9 @@ class FloatingService : Service() {
                 Log.d("FloatingService", "開始點擊")
                 if (duration > 0) {
                     stopTime = System.currentTimeMillis() + duration
-                    handler.post(timerRunnable) // 啟動計時器
+                    handler.post(timerRunnable)
                 }
+                updateClickPointTouchable(false) // 點擊時不可拖曳
                 handler.post(clickRunnable)
                 playPauseButton.setImageResource(android.R.drawable.ic_media_pause)
             } else {
@@ -270,6 +281,7 @@ class FloatingService : Service() {
                 handler.removeCallbacks(clickRunnable)
                 handler.removeCallbacks(timerRunnable)
                 updateTimerText()
+                updateClickPointTouchable(true) // 停止後恢復可拖曳
                 playPauseButton.setImageResource(android.R.drawable.ic_media_play)
             }
         }
@@ -371,6 +383,7 @@ class FloatingService : Service() {
             handler.removeCallbacks(clickRunnable)
             handler.removeCallbacks(timerRunnable)
             updateTimerText()
+            updateClickPointTouchable(true)
             Toast.makeText(this, "無障礙服務斷開，請重啟應用或設備", Toast.LENGTH_LONG).show()
             return
         }
