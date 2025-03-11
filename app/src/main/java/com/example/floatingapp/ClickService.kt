@@ -1,9 +1,9 @@
 package com.example.floatingapp
 
 import android.accessibilityservice.AccessibilityService
+import android.graphics.Path
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
-import android.graphics.Path
 
 class ClickService : AccessibilityService() {
 
@@ -21,7 +21,9 @@ class ClickService : AccessibilityService() {
         Log.d("ClickService", "無障礙服務已中斷")
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // 不再用於錄製
+    }
 
     fun performClick(x: Int, y: Int) {
         Log.d("ClickService", "開始執行點擊: x=$x, y=$y")
@@ -30,7 +32,7 @@ class ClickService : AccessibilityService() {
             lineTo(x.toFloat(), y.toFloat())
         }
         val gestureDescription = android.accessibilityservice.GestureDescription.Builder()
-            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0L, 500L)) // 增加到 500ms
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0L, 100L))
             .build()
         val result = dispatchGesture(gestureDescription, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: android.accessibilityservice.GestureDescription?) {
