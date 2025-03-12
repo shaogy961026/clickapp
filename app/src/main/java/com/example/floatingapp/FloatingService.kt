@@ -40,8 +40,8 @@ class FloatingService : Service() {
     private var clickInterval = 1000L
     private var duration = 0L
     private var stopTime = 0L
-    private var commonX = 2682f // 常用位置 X（不含狀態列）
-    private var commonY = 1293f // 常用位置 Y（不含狀態列）
+    private var commonX = 2680f // 常用位置 X（不含狀態列）
+    private var commonY = 1295f // 常用位置 Y（不含狀態列）
     private var rawCenterX = 0f // 含狀態列的中心點 X（用於點擊）
     private var rawCenterY = 0f // 含狀態列的中心點 Y（用於點擊）
     private var centerX = 0f    // 不含狀態列的中心點 X（用於顯示和儲存）
