@@ -40,8 +40,8 @@ class FloatingService : Service() {
     private var clickInterval = 1000L
     private var duration = 0L
     private var stopTime = 0L
-    private var commonX = 2680f // 常用位置 X（不含狀態列）
-    private var commonY = 1295f // 常用位置 Y（不含狀態列）
+    private var commonX = 2532f // 常用位置 X（不含狀態列）
+    private var commonY = 1280f // 常用位置 Y（不含狀態列）
     private var rawCenterX = 0f // 含狀態列的中心點 X（用於點擊）
     private var rawCenterY = 0f // 含狀態列的中心點 Y（用於點擊）
     private var centerX = 0f    // 不含狀態列的中心點 X（用於顯示和儲存）
@@ -57,6 +57,8 @@ class FloatingService : Service() {
                     handler.removeCallbacks(this)
                     updateTimerText()
                     updateButtonStates()
+                    // 停止點擊時恢復 clickPointView 可見性
+                    clickPointView?.visibility = View.VISIBLE
                     Toast.makeText(this@FloatingService, "持續時間已到，停止點擊", Toast.LENGTH_SHORT).show()
                     Log.d("FloatingService", "持續時間結束，停止點擊")
                     return
@@ -167,6 +169,7 @@ class FloatingService : Service() {
             handler.removeCallbacks(timerRunnable)
             playPauseButton.setImageResource(android.R.drawable.ic_media_play)
             updateButtonStates()
+            clickPointView?.visibility = View.VISIBLE // 確保設置窗口打開時顯示 clickPointView
         }
 
         lateinit var intervalEdit: EditText
@@ -193,24 +196,15 @@ class FloatingService : Service() {
                 inputType = android.text.InputType.TYPE_CLASS_NUMBER
             }
             addView(durationEdit)
+            
+            // 改為純顯示，不允許輸入
+            addView(TextView(this@FloatingService).apply {
+                text = "常用位置 X: ${centerX.toInt()}"
+            })
 
             addView(TextView(this@FloatingService).apply {
-                text = "常用位置 X:"
+                text = "常用位置 Y: ${centerY.toInt()}"
             })
-            val xEdit = EditText(this@FloatingService).apply {
-                setText(centerX.toInt().toString())
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            }
-            addView(xEdit)
-
-            addView(TextView(this@FloatingService).apply {
-                text = "常用位置 Y:"
-            })
-            val yEdit = EditText(this@FloatingService).apply {
-                setText(centerY.toInt().toString())
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            }
-            addView(yEdit)
 
             val savePositionButton = Button(this@FloatingService).apply {
                 text = "儲存常用位置"
@@ -233,9 +227,7 @@ class FloatingService : Service() {
                     duration = if (durationSec > 0) durationSec * 1000 else 0
                     updateTimerText()
 
-                    val newX = (xEdit.text.toString().toFloatOrNull() ?: centerX).coerceAtLeast(0f)
-                    val newY = (yEdit.text.toString().toFloatOrNull() ?: centerY).coerceAtLeast(0f)
-                    updateClickPosition(newX, newY)
+                    updateClickPosition(rawCenterX, rawCenterY)
 
                     windowManager.removeView(settingsView)
                     settingsView = null
@@ -246,6 +238,7 @@ class FloatingService : Service() {
                             stopTime = System.currentTimeMillis() + duration
                             handler.post(timerRunnable)
                         }
+                        clickPointView?.visibility = View.GONE // 恢復點擊時隱藏
                         handler.post(clickRunnable)
                         playPauseButton.setImageResource(android.R.drawable.ic_media_pause)
                         updateButtonStates()
@@ -359,6 +352,7 @@ class FloatingService : Service() {
                     stopTime = System.currentTimeMillis() + duration
                     handler.post(timerRunnable)
                 }
+                clickPointView?.visibility = View.GONE // 開始點擊時隱藏 clickPointView
                 handler.post(clickRunnable)
                 playPauseButton.setImageResource(android.R.drawable.ic_media_pause)
                 updateButtonStates()
@@ -368,6 +362,7 @@ class FloatingService : Service() {
                 handler.removeCallbacks(timerRunnable)
                 updateTimerText()
                 playPauseButton.setImageResource(android.R.drawable.ic_media_play)
+                clickPointView?.visibility = View.VISIBLE // 停止點擊時恢復顯示
                 updateButtonStates()
             }
         }
@@ -467,6 +462,7 @@ class FloatingService : Service() {
             handler.removeCallbacks(timerRunnable)
             updateTimerText()
             updateButtonStates()
+            clickPointView?.visibility = View.VISIBLE // 無障礙服務不可用時恢復顯示
             Toast.makeText(this, "無障礙服務斷開，請重啟應用或設備", Toast.LENGTH_LONG).show()
             return
         }
@@ -484,8 +480,8 @@ class FloatingService : Service() {
 
     private fun loadCommonPosition() {
         val prefs = getSharedPreferences("FloatingAppPrefs", Context.MODE_PRIVATE)
-        commonX = prefs.getFloat("commonX", 2956f)
-        commonY = prefs.getFloat("commonY", 1256f)
+        commonX = prefs.getFloat("commonX", 2532f)
+        commonY = prefs.getFloat("commonY", 1280f)
         // 初始化時，將 commonX, commonY 轉換回含狀態列座標
         val statusBarHeight = getStatusBarHeight()
         val rotation = windowManager.defaultDisplay.rotation
