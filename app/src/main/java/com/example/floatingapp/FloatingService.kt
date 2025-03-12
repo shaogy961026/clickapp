@@ -40,8 +40,8 @@ class FloatingService : Service() {
     private var clickInterval = 1000L
     private var duration = 0L
     private var stopTime = 0L
-    private var commonX = 2956f // 常用位置 X（不含狀態列）
-    private var commonY = 1256f // 常用位置 Y（不含狀態列）
+    private var commonX = 2682f // 常用位置 X（不含狀態列）
+    private var commonY = 1293f // 常用位置 Y（不含狀態列）
     private var rawCenterX = 0f // 含狀態列的中心點 X（用於點擊）
     private var rawCenterY = 0f // 含狀態列的中心點 Y（用於點擊）
     private var centerX = 0f    // 不含狀態列的中心點 X（用於顯示和儲存）
@@ -394,6 +394,10 @@ class FloatingService : Service() {
                 Toast.makeText(this, "點擊進行中，請先停止點擊", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
+            // 切換為錄製中圖標
+            recordButton.setImageResource(android.R.drawable.ic_menu_camera)
+            Toast.makeText(this, "請點擊螢幕以錄製位置", Toast.LENGTH_SHORT).show()
+
             val overlayView = View(this).apply {
                 layoutParams = WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
@@ -410,6 +414,8 @@ class FloatingService : Service() {
                     val newRawY = event.rawY
                     updateClickPosition(newRawX, newRawY)
                     windowManager.removeView(overlayView)
+                    // 錄製完成後恢復原始圖標
+                    recordButton.setImageResource(android.R.drawable.ic_menu_add)
                     Toast.makeText(this, "點擊位置已更新: x=$centerX, y=$centerY", Toast.LENGTH_SHORT).show()
                     true
                 } else {
