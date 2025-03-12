@@ -1,6 +1,7 @@
 package com.example.floatingapp
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Handler
@@ -13,44 +14,75 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.Button
+import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
+import android.view.inputmethod.InputMethodManager
 
 class FloatingService : Service() {
 
     private lateinit var windowManager: WindowManager
     private var toolbarView: View? = null
     private var clickPointView: ImageView? = null
+    private var settingsView: View? = null
     private lateinit var playPauseButton: ImageButton
     private lateinit var settingsButton: ImageButton
     private lateinit var locationButton: ImageButton
     private lateinit var recordButton: ImageButton
     private lateinit var closeButton: ImageButton
+    private lateinit var timerText: TextView
     private var isClicking = false
-    private var isRecording = false
     private var clickInterval = 1000L
-    private var clickX = 0f // 點擊座標
-    private var clickY = 0f
+    private var duration = 0L
+    private var stopTime = 0L
+    private var commonX = 2956f
+    private var commonY = 1256f
+    private var centerX = 0f // clickPointView 的中心點 X
+    private var centerY = 0f // clickPointView 的中心點 Y
     private val handler = Handler(Looper.getMainLooper())
     private val clickRunnable: Runnable = object : Runnable {
         override fun run() {
             if (isClicking) {
-                Log.d("FloatingService", "執行點擊: x=$clickX, y=$clickY")
-                performClickAt(clickX, clickY)
+                val currentTime = System.currentTimeMillis()
+                if (duration > 0 && currentTime >= stopTime) {
+                    isClicking = false
+                    playPauseButton.setImageResource(android.R.drawable.ic_media_play)
+                    handler.removeCallbacks(this)
+                    updateTimerText()
+                    updateButtonStates()
+                    Toast.makeText(this@FloatingService, "持續時間已到，停止點擊", Toast.LENGTH_SHORT).show()
+                    Log.d("FloatingService", "持續時間結束，停止點擊")
+                    return
+                }
+                Log.d("FloatingService", "執行點擊: x=$centerX, y=$centerY")
+                performClickAt(centerX, centerY)
                 handler.postDelayed(this, clickInterval)
             } else {
                 Log.d("FloatingService", "停止點擊")
             }
         }
     }
+    private val timerRunnable: Runnable = object : Runnable {
+        override fun run() {
+            updateTimerText()
+            if (isClicking && duration > 0) {
+                handler.postDelayed(this, 1000L)
+            }
+        }
+    }
 
     private var toolbarParams: WindowManager.LayoutParams? = null
     private var clickPointParams: WindowManager.LayoutParams? = null
+    private var settingsParams: WindowManager.LayoutParams? = null
+    private val clickPointSize = 50 // clickPointView 的寬高 (dp)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        loadCommonPosition()
         if (toolbarView == null || clickPointView == null) {
             setupToolbar()
             setupClickPoint()
@@ -69,6 +101,7 @@ class FloatingService : Service() {
         locationButton = toolbarView!!.findViewById(R.id.locationButton)
         recordButton = toolbarView!!.findViewById(R.id.recordButton)
         closeButton = toolbarView!!.findViewById(R.id.closeButton)
+        timerText = toolbarView!!.findViewById(R.id.timerText)
 
         toolbarParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -83,41 +116,34 @@ class FloatingService : Service() {
         }
 
         windowManager.addView(toolbarView, toolbarParams)
+        updateTimerText()
     }
 
     private fun setupClickPoint() {
         clickPointView = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_menu_add)
-            layoutParams = WindowManager.LayoutParams(50, 50)
         }
 
-        val metrics = DisplayMetrics()
-        windowManager.defaultDisplay.getMetrics(metrics)
-        val screenWidth = metrics.widthPixels
-        val screenHeight = metrics.heightPixels
+        val clickPointWidth = dpToPx(clickPointSize)
+        val clickPointHeight = dpToPx(clickPointSize)
 
-        var initialX = 540
-        var initialY = 960
-        if (initialX + 50 > screenWidth) initialX = screenWidth - 50
-        if (initialY + 50 > screenHeight) initialY = screenHeight - 50
-        if (initialX < 0) initialX = 0
-        if (initialY < 0) initialY = 0
+        centerX = commonX
+        centerY = commonY
 
         clickPointParams = WindowManager.LayoutParams(
-            50,
-            50,
+            clickPointWidth,
+            clickPointHeight,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = initialX
-            y = initialY
+            x = 0 // 初始值
+            y = 0
         }
 
         windowManager.addView(clickPointView, clickPointParams)
-        clickX = clickPointParams!!.x + 25f
-        clickY = clickPointParams!!.y + 25f
+        updateClickPosition(centerX, centerY) // 初始化中心點
     }
 
     private fun getStatusBarHeight(): Int {
@@ -127,6 +153,178 @@ class FloatingService : Service() {
             result = resources.getDimensionPixelSize(resourceId)
         }
         return result
+    }
+
+    private fun showSettingsWindow() {
+        if (settingsView != null) {
+            windowManager.removeView(settingsView)
+        }
+
+        val wasClicking = isClicking
+        if (isClicking) {
+            isClicking = false
+            handler.removeCallbacks(clickRunnable)
+            handler.removeCallbacks(timerRunnable)
+            playPauseButton.setImageResource(android.R.drawable.ic_media_play)
+            updateButtonStates()
+        }
+
+        lateinit var intervalEdit: EditText
+
+        settingsView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20, 20, 20, 20)
+            setBackgroundColor(0xFFEEEEEE.toInt())
+
+            addView(TextView(this@FloatingService).apply {
+                text = "點擊間隔 (ms, 100-10000):"
+            })
+            intervalEdit = EditText(this@FloatingService).apply {
+                setText(clickInterval.toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            addView(intervalEdit)
+
+            addView(TextView(this@FloatingService).apply {
+                text = "持續時間 (秒, 0 表示無限):"
+            })
+            val durationEdit = EditText(this@FloatingService).apply {
+                setText((duration / 1000).toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            addView(durationEdit)
+
+            addView(TextView(this@FloatingService).apply {
+                text = "常用位置 X:"
+            })
+            val xEdit = EditText(this@FloatingService).apply {
+                setText(centerX.toInt().toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            addView(xEdit)
+
+            addView(TextView(this@FloatingService).apply {
+                text = "常用位置 Y:"
+            })
+            val yEdit = EditText(this@FloatingService).apply {
+                setText(centerY.toInt().toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            }
+            addView(yEdit)
+
+            val savePositionButton = Button(this@FloatingService).apply {
+                text = "儲存常用位置"
+                setOnClickListener {
+                    commonX = centerX
+                    commonY = centerY
+                    saveCommonPosition()
+                    Toast.makeText(this@FloatingService, "已儲存常用位置: x=$commonX, y=$commonY", Toast.LENGTH_SHORT).show()
+                }
+            }
+            addView(savePositionButton)
+
+            val confirmButton = Button(this@FloatingService).apply {
+                text = "確認"
+                setOnClickListener {
+                    val interval = intervalEdit.text.toString().toLongOrNull() ?: clickInterval
+                    clickInterval = interval.coerceIn(100L, 10000L)
+
+                    val durationSec = durationEdit.text.toString().toLongOrNull() ?: (duration / 1000)
+                    duration = if (durationSec > 0) durationSec * 1000 else 0
+                    updateTimerText()
+
+                    val newX = (xEdit.text.toString().toFloatOrNull() ?: centerX).coerceAtLeast(0f)
+                    val newY = (yEdit.text.toString().toFloatOrNull() ?: centerY).coerceAtLeast(0f)
+                    updateClickPosition(newX, newY)
+
+                    windowManager.removeView(settingsView)
+                    settingsView = null
+
+                    if (wasClicking) {
+                        isClicking = true
+                        if (duration > 0) {
+                            stopTime = System.currentTimeMillis() + duration
+                            handler.post(timerRunnable)
+                        }
+                        handler.post(clickRunnable)
+                        playPauseButton.setImageResource(android.R.drawable.ic_media_pause)
+                        updateButtonStates()
+                    }
+
+                    Toast.makeText(this@FloatingService, "設定已更新", Toast.LENGTH_SHORT).show()
+                }
+            }
+            addView(confirmButton)
+        }
+
+        settingsParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+        }
+
+        windowManager.addView(settingsView, settingsParams)
+
+        intervalEdit.requestFocus()
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(intervalEdit, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun updateTimerText() {
+        if (duration == 0L) {
+            timerText.text = "剩餘：無限"
+        } else if (isClicking) {
+            val remainingTime = (stopTime - System.currentTimeMillis()).coerceAtLeast(0) / 1000
+            timerText.text = "剩餘：$remainingTime 秒"
+        } else {
+            timerText.text = "剩餘：${duration / 1000} 秒"
+        }
+    }
+
+    private fun updateButtonStates() {
+        settingsButton.isEnabled = !isClicking
+        locationButton.isEnabled = !isClicking
+        recordButton.isEnabled = !isClicking
+    }
+
+    private fun updateClickPosition(newCenterX: Float, newCenterY: Float) {
+        val metrics = DisplayMetrics()
+        windowManager.defaultDisplay.getMetrics(metrics)
+        val screenWidth = metrics.widthPixels
+        val screenHeight = metrics.heightPixels
+        val clickPointWidth = dpToPx(clickPointSize).toFloat()
+        val clickPointHeight = dpToPx(clickPointSize).toFloat()
+
+        // 更新中心點
+        centerX = newCenterX
+        centerY = newCenterY
+
+        // 計算左上角位置，使中心點精準對齊
+        var targetX = centerX - clickPointWidth / 2
+        var targetY = centerY - clickPointHeight / 2
+
+        // 調整邊界，確保圖標不超出螢幕
+        if (targetX + clickPointWidth > screenWidth) targetX = screenWidth - clickPointWidth
+        if (targetY + clickPointHeight > screenHeight) targetY = screenHeight - clickPointHeight
+        if (targetX < 0) targetX = 0f
+        if (targetY < 0) targetY = 0f
+
+        // 如果邊界調整影響了位置，反推中心點
+        centerX = targetX + clickPointWidth / 2
+        centerY = targetY + clickPointHeight / 2
+
+        clickPointParams?.x = targetX.toInt()
+        clickPointParams?.y = targetY.toInt()
+        clickPointView?.let { windowManager.updateViewLayout(it, clickPointParams) }
+    }
+
+    private fun dpToPx(dp: Int): Int {
+        val density = resources.displayMetrics.density
+        return (dp * density + 0.5f).toInt()
     }
 
     private fun setupListeners() {
@@ -139,48 +337,45 @@ class FloatingService : Service() {
                     return@setOnClickListener
                 }
                 Log.d("FloatingService", "開始點擊")
+                if (duration > 0) {
+                    stopTime = System.currentTimeMillis() + duration
+                    handler.post(timerRunnable)
+                }
                 handler.post(clickRunnable)
                 playPauseButton.setImageResource(android.R.drawable.ic_media_pause)
+                updateButtonStates()
             } else {
-                Log.d("FloatingService", "停止點擊")
+                Log.d("FloatingService", "手動停止點擊")
                 handler.removeCallbacks(clickRunnable)
+                handler.removeCallbacks(timerRunnable)
+                updateTimerText()
                 playPauseButton.setImageResource(android.R.drawable.ic_media_play)
+                updateButtonStates()
             }
         }
 
         settingsButton.setOnClickListener {
-            Toast.makeText(this, "設置功能尚未實作", Toast.LENGTH_SHORT).show()
+            if (isClicking) {
+                Toast.makeText(this, "點擊進行中，請先停止點擊", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            showSettingsWindow()
         }
 
         locationButton.setOnClickListener {
-            val metrics = DisplayMetrics()
-            windowManager.defaultDisplay.getMetrics(metrics)
-            val screenWidth = metrics.widthPixels
-            val screenHeight = metrics.heightPixels
-
-            var targetX = 2956
-            var targetY = 1256
-            if (targetX + 50 > screenWidth) targetX = screenWidth - 50
-            if (targetY + 50 > screenHeight) targetY = screenHeight - 50
-            if (targetX < 0) targetX = 0
-            if (targetY < 0) targetY = 0
-
-            clickX = targetX + 25f
-            clickY = targetY + 25f
-            clickPointParams?.x = targetX
-            clickPointParams?.y = targetY
-            clickPointView?.let { windowManager.updateViewLayout(it, clickPointParams) }
-            Toast.makeText(this, "已移動到常用位置: x=$clickX, y=$clickY", Toast.LENGTH_SHORT).show()
+            if (isClicking) {
+                Toast.makeText(this, "點擊進行中，請先停止點擊", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            updateClickPosition(commonX, commonY)
+            Toast.makeText(this, "已移動到常用位置: x=$centerX, y=$centerY", Toast.LENGTH_SHORT).show()
         }
 
         recordButton.setOnClickListener {
             if (isClicking) {
-                Toast.makeText(this, "請先停止點擊", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "點擊進行中，請先停止點擊", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            isRecording = true
-            Toast.makeText(this, "請點擊螢幕設定位置", Toast.LENGTH_SHORT).show()
-            recordButton.setImageResource(android.R.drawable.ic_menu_camera)
             val overlayView = View(this).apply {
                 layoutParams = WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
@@ -192,21 +387,12 @@ class FloatingService : Service() {
             }
             windowManager.addView(overlayView, overlayView.layoutParams)
             overlayView.setOnTouchListener { _, event ->
-                if (isRecording && event.action == MotionEvent.ACTION_DOWN) {
-                    val statusBarHeight = getStatusBarHeight()
-                    clickX = event.rawX
-                    clickY = event.rawY
-                    clickPointParams?.x = (clickX - 25f).toInt()
-                    clickPointParams?.y = (clickY - 25f - statusBarHeight).toInt() // 減去狀態列高度
-                    clickPointView?.let { windowManager.updateViewLayout(it, clickPointParams) }
-                    isRecording = false
-                    recordButton.setImageResource(android.R.drawable.ic_menu_edit)
+                if (event.action == MotionEvent.ACTION_DOWN) {
+                    val newX = event.rawX
+                    val newY = event.rawY
+                    updateClickPosition(newX, newY)
                     windowManager.removeView(overlayView)
-                    Toast.makeText(this, "點擊位置已更新: x=$clickX, y=$clickY", Toast.LENGTH_SHORT).show()
-                    // 驗證實際位置
-                    val location = IntArray(2)
-                    clickPointView?.getLocationOnScreen(location)
-                    Log.d("FloatingService", "clickPointView 實際位置: x=${location[0] + 25f}, y=${location[1] + 25f}")
+                    Toast.makeText(this, "點擊位置已更新: x=$centerX, y=$centerY", Toast.LENGTH_SHORT).show()
                     true
                 } else {
                     false
@@ -254,10 +440,28 @@ class FloatingService : Service() {
             isClicking = false
             playPauseButton.setImageResource(android.R.drawable.ic_media_play)
             handler.removeCallbacks(clickRunnable)
+            handler.removeCallbacks(timerRunnable)
+            updateTimerText()
+            updateButtonStates()
             Toast.makeText(this, "無障礙服務斷開，請重啟應用或設備", Toast.LENGTH_LONG).show()
             return
         }
         ClickService.instance?.performClick(x.toInt(), y.toInt())
+    }
+
+    private fun saveCommonPosition() {
+        val prefs = getSharedPreferences("FloatingAppPrefs", Context.MODE_PRIVATE)
+        with(prefs.edit()) {
+            putFloat("commonX", centerX)
+            putFloat("commonY", centerY)
+            apply()
+        }
+    }
+
+    private fun loadCommonPosition() {
+        val prefs = getSharedPreferences("FloatingAppPrefs", Context.MODE_PRIVATE)
+        commonX = prefs.getFloat("commonX", 2956f)
+        commonY = prefs.getFloat("commonY", 1256f)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -265,6 +469,7 @@ class FloatingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacks(clickRunnable)
+        handler.removeCallbacks(timerRunnable)
         cleanupViews()
         Log.d("FloatingService", "服務已銷毀")
     }
@@ -273,6 +478,7 @@ class FloatingService : Service() {
         super.onTaskRemoved(rootIntent)
         Log.d("FloatingService", "應用被滑掉，清理並停止服務")
         handler.removeCallbacks(clickRunnable)
+        handler.removeCallbacks(timerRunnable)
         cleanupViews()
         stopSelf()
     }
@@ -281,8 +487,10 @@ class FloatingService : Service() {
         try {
             toolbarView?.let { windowManager.removeView(it) }
             clickPointView?.let { windowManager.removeView(it) }
+            settingsView?.let { windowManager.removeView(it) }
             toolbarView = null
             clickPointView = null
+            settingsView = null
         } catch (e: Exception) {
             Log.e("FloatingService", "移除視圖失敗: ${e.message}")
         }
