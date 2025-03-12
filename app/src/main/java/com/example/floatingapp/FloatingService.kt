@@ -12,6 +12,7 @@ import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
+import android.view.Surface
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
@@ -39,10 +40,12 @@ class FloatingService : Service() {
     private var clickInterval = 1000L
     private var duration = 0L
     private var stopTime = 0L
-    private var commonX = 2956f
-    private var commonY = 1256f
-    private var centerX = 0f // clickPointView 的中心點 X
-    private var centerY = 0f // clickPointView 的中心點 Y
+    private var commonX = 2956f // 常用位置 X（不含狀態列）
+    private var commonY = 1256f // 常用位置 Y（不含狀態列）
+    private var rawCenterX = 0f // 含狀態列的中心點 X（用於點擊）
+    private var rawCenterY = 0f // 含狀態列的中心點 Y（用於點擊）
+    private var centerX = 0f    // 不含狀態列的中心點 X（用於顯示和儲存）
+    private var centerY = 0f    // 不含狀態列的中心點 Y（用於顯示和儲存）
     private val handler = Handler(Looper.getMainLooper())
     private val clickRunnable: Runnable = object : Runnable {
         override fun run() {
@@ -58,8 +61,8 @@ class FloatingService : Service() {
                     Log.d("FloatingService", "持續時間結束，停止點擊")
                     return
                 }
-                Log.d("FloatingService", "執行點擊: x=$centerX, y=$centerY")
-                performClickAt(centerX, centerY)
+                Log.d("FloatingService", "執行點擊: x=$rawCenterX, y=$rawCenterY")
+                performClickAt(rawCenterX, rawCenterY)
                 handler.postDelayed(this, clickInterval)
             } else {
                 Log.d("FloatingService", "停止點擊")
@@ -127,9 +130,6 @@ class FloatingService : Service() {
         val clickPointWidth = dpToPx(clickPointSize)
         val clickPointHeight = dpToPx(clickPointSize)
 
-        centerX = commonX
-        centerY = commonY
-
         clickPointParams = WindowManager.LayoutParams(
             clickPointWidth,
             clickPointHeight,
@@ -138,12 +138,12 @@ class FloatingService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 0 // 初始值
+            x = 0
             y = 0
         }
 
         windowManager.addView(clickPointView, clickPointParams)
-        updateClickPosition(centerX, centerY) // 初始化中心點
+        updateClickPosition(commonX + getStatusBarHeight(), commonY) // 初始化時轉換
     }
 
     private fun getStatusBarHeight(): Int {
@@ -291,29 +291,47 @@ class FloatingService : Service() {
         recordButton.isEnabled = !isClicking
     }
 
-    private fun updateClickPosition(newCenterX: Float, newCenterY: Float) {
+    private fun updateClickPosition(rawX: Float, rawY: Float) {
         val metrics = DisplayMetrics()
         windowManager.defaultDisplay.getMetrics(metrics)
         val screenWidth = metrics.widthPixels
         val screenHeight = metrics.heightPixels
         val clickPointWidth = dpToPx(clickPointSize).toFloat()
         val clickPointHeight = dpToPx(clickPointSize).toFloat()
+        val statusBarHeight = getStatusBarHeight()
 
-        // 更新中心點
-        centerX = newCenterX
-        centerY = newCenterY
+        // 儲存含狀態列的座標（用於點擊）
+        rawCenterX = rawX
+        rawCenterY = rawY
+
+        // 根據螢幕方向計算不含狀態列的座標
+        val rotation = windowManager.defaultDisplay.rotation
+        when (rotation) {
+            Surface.ROTATION_0, Surface.ROTATION_180 -> { // 縱向
+                centerX = rawX
+                centerY = rawY - statusBarHeight
+            }
+            Surface.ROTATION_90 -> { // 橫向，狀態列在左側
+                centerX = rawX - statusBarHeight
+                centerY = rawY
+            }
+            Surface.ROTATION_270 -> { // 橫向，狀態列在右側
+                centerX = rawX
+                centerY = rawY
+            }
+        }
 
         // 計算左上角位置，使中心點精準對齊
         var targetX = centerX - clickPointWidth / 2
         var targetY = centerY - clickPointHeight / 2
 
-        // 調整邊界，確保圖標不超出螢幕
+        // 調整邊界
         if (targetX + clickPointWidth > screenWidth) targetX = screenWidth - clickPointWidth
         if (targetY + clickPointHeight > screenHeight) targetY = screenHeight - clickPointHeight
         if (targetX < 0) targetX = 0f
         if (targetY < 0) targetY = 0f
 
-        // 如果邊界調整影響了位置，反推中心點
+        // 更新中心點（不含狀態列）
         centerX = targetX + clickPointWidth / 2
         centerY = targetY + clickPointHeight / 2
 
@@ -367,7 +385,7 @@ class FloatingService : Service() {
                 Toast.makeText(this, "點擊進行中，請先停止點擊", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            updateClickPosition(commonX, commonY)
+            updateClickPosition(commonX, commonY + getStatusBarHeight()) // 轉換為含狀態列座標
             Toast.makeText(this, "已移動到常用位置: x=$centerX, y=$centerY", Toast.LENGTH_SHORT).show()
         }
 
@@ -388,9 +406,9 @@ class FloatingService : Service() {
             windowManager.addView(overlayView, overlayView.layoutParams)
             overlayView.setOnTouchListener { _, event ->
                 if (event.action == MotionEvent.ACTION_DOWN) {
-                    val newX = event.rawX
-                    val newY = event.rawY
-                    updateClickPosition(newX, newY)
+                    val newRawX = event.rawX
+                    val newRawY = event.rawY
+                    updateClickPosition(newRawX, newRawY)
                     windowManager.removeView(overlayView)
                     Toast.makeText(this, "點擊位置已更新: x=$centerX, y=$centerY", Toast.LENGTH_SHORT).show()
                     true
@@ -452,7 +470,7 @@ class FloatingService : Service() {
     private fun saveCommonPosition() {
         val prefs = getSharedPreferences("FloatingAppPrefs", Context.MODE_PRIVATE)
         with(prefs.edit()) {
-            putFloat("commonX", centerX)
+            putFloat("commonX", centerX) // 儲存不含狀態列的座標
             putFloat("commonY", centerY)
             apply()
         }
@@ -462,6 +480,25 @@ class FloatingService : Service() {
         val prefs = getSharedPreferences("FloatingAppPrefs", Context.MODE_PRIVATE)
         commonX = prefs.getFloat("commonX", 2956f)
         commonY = prefs.getFloat("commonY", 1256f)
+        // 初始化時，將 commonX, commonY 轉換回含狀態列座標
+        val statusBarHeight = getStatusBarHeight()
+        val rotation = windowManager.defaultDisplay.rotation
+        when (rotation) {
+            Surface.ROTATION_0, Surface.ROTATION_180 -> {
+                rawCenterX = commonX
+                rawCenterY = commonY + statusBarHeight
+            }
+            Surface.ROTATION_90 -> {
+                rawCenterX = commonX + statusBarHeight
+                rawCenterY = commonY
+            }
+            Surface.ROTATION_270 -> {
+                rawCenterX = commonX
+                rawCenterY = commonY + statusBarHeight
+            }
+        }
+        centerX = commonX
+        centerY = commonY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
